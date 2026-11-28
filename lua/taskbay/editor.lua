@@ -237,7 +237,18 @@ function M.publish(buf)
           .. "; publishing was blocked. Review it and use :TaskbayReload before retrying")
       assert(vim.api.nvim_buf_is_valid(buf) and not vim.bo[buf].modified and read(path) == saved,
         "Draft changed during confirmation; review it and publish again")
-      tasks.update(info.target, title, body, diffs)
+      local updated, update_error = pcall(tasks.update, info.target, title, body, diffs)
+      if not updated then
+        -- Part of the update may have arrived (gh edits the text and changes the state in
+        -- separate calls). Record what did, keeping the fields, so a retry sends the rest.
+        local now = fetch(info.target)
+        if now.title == title and (now.body or "") == body then
+          info.title, info.body = title, body
+          core.write(baseline, vim.json.encode(info))
+          if vim.api.nvim_buf_is_valid(buf) then vim.b[buf].taskbay_task = info end
+        end
+        error(update_error, 0)
+      end
       info.title, info.body = title, body
       info.fields = nil -- pushed; the next Fields edit starts from the current issue
       core.write(baseline, vim.json.encode(info))

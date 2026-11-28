@@ -417,50 +417,52 @@ local function alive(pid)
   return result ~= nil or not tostring(err):find("ESRCH", 1, true)
 end
 
+-- An owner.json nobody can still be using: its editor and agent have exited, or it cannot be read
+-- and is older than a few seconds (a live editor writes it in one step, so only a crash leaves it so).
+local function abandoned(path)
+  local ok, owner = pcall(M.read_json, path)
+  if ok and type(owner) == "table" then
+    return type(owner.pid) == "number" and not alive(owner.pid) and (not owner.job_pid or not alive(owner.job_pid))
+  end
+  local stat = uv.fs_stat(path)
+  return stat ~= nil and os.time() - stat.mtime.sec > 5
+end
+
 function M.lock(workspace, run)
   local path = directory(workspace) .. "/owner.json"
   vim.fn.mkdir(directory(workspace), "p", 448)
-  local fd = uv.fs_open(path, "wx", 384)
-  if not fd then
-    local ok, owner = pcall(M.read_json, path)
-    if
-      ok
-      and type(owner) == "table"
-      and type(owner.pid) == "number"
-      and not alive(owner.pid)
-      and (not owner.job_pid or not alive(owner.job_pid))
-    then
-      assert(
-        M.choose(
-          { "Cancel", "Recover abandoned lock" },
-          "Both the recorded editor and agent have exited. Recover " .. tasks.label(workspace) .. "?"
-        ) == "Recover abandoned lock",
-        "Ownership recovery cancelled"
-      )
-      local recovery_path = path .. ".recovery"
-      local guard =
-        assert(uv.fs_open(recovery_path, "wx", 384), "Another editor is recovering this workspace: " .. recovery_path)
-      local recovered, recovered_fd = pcall(function()
-        local current = M.read_json(path)
-        assert(
-          type(current.pid) == "number"
-            and not alive(current.pid)
-            and (not current.job_pid or not alive(current.job_pid)),
-          "Workspace owner changed during recovery; inspect before retrying"
-        )
-        assert(uv.fs_unlink(path))
-        return uv.fs_open(path, "wx", 384)
-      end)
-      uv.fs_close(guard)
-      assert(uv.fs_unlink(recovery_path))
-      assert(recovered, recovered_fd)
-      fd = recovered_fd
-    end
+  -- The lock appears with its content in one step: written to a temporary file, then linked into
+  -- place. The link fails when owner.json exists, like an exclusive create.
+  local function acquire()
+    local temporary = path .. "." .. token .. ".tmp"
+    local fd = assert(uv.fs_open(temporary, "w", 384))
+    local written, err = uv.fs_write(fd, vim.json.encode({ token = token, run = run, pid = vim.fn.getpid() }), 0)
+    uv.fs_close(fd)
+    assert(written, err)
+    local linked = uv.fs_link(temporary, path)
+    uv.fs_unlink(temporary)
+    return linked ~= nil
   end
-  assert(fd, "Workspace is owned by another editor (or has an unknown owner): " .. path)
-  local written, err = uv.fs_write(fd, vim.json.encode({ token = token, run = run, pid = vim.fn.getpid() }), 0)
-  uv.fs_close(fd)
-  assert(written, err)
+  if acquire() then return end
+  assert(abandoned(path), "Workspace is owned by another editor (or has an unknown owner): " .. path)
+  assert(
+    M.choose(
+      { "Cancel", "Recover abandoned lock" },
+      "The recorded editor and agent have exited, or the lock is unreadable. Recover " .. tasks.label(workspace) .. "?"
+    ) == "Recover abandoned lock",
+    "Ownership recovery cancelled"
+  )
+  local recovery_path = path .. ".recovery"
+  local guard =
+    assert(uv.fs_open(recovery_path, "wx", 384), "Another editor is recovering this workspace: " .. recovery_path)
+  local recovered, recover_error = pcall(function()
+    assert(abandoned(path), "Workspace owner changed during recovery; inspect before retrying")
+    assert(uv.fs_unlink(path))
+    assert(acquire(), "Another editor took the workspace during recovery: " .. path)
+  end)
+  uv.fs_close(guard)
+  assert(uv.fs_unlink(recovery_path))
+  assert(recovered, recover_error)
 end
 
 function M.unlock(workspace)
@@ -557,7 +559,7 @@ end
 function M.paste(workspace, text, submit)
   local job = M.jobs[workspace.id]
   if not job or job.exited then return end
-  vim.api.nvim_chan_send(job.channel, "\27[200~" .. text .. "\27[201~")
+  vim.api.nvim_chan_send(job.channel, require("taskbay.terminal").bracketed(text))
   if submit then
     vim.defer_fn(function()
       if M.jobs[workspace.id] == job and not job.exited then vim.api.nvim_chan_send(job.channel, "\r") end

@@ -155,6 +155,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   step("Enter and dashboard digits jump to a running task's pi")
   keys("<Esc><Space>aw")
   wait_for("Workspace panel lists task 3", "return e2e.dashboard_row(3) ~= nil")
+  wait_for("The panel lists task 3", "return e2e.dashboard_row(3) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(3), 0 })")
   wait_for("The footer follows the selected running task", [[
     local _, win = e2e.float_lines("Task Workspaces")
@@ -182,6 +183,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   step("a fourth task is prepared but must wait for a slot")
   keys("<C-\\><C-n><Esc><Space>aw")
   wait_for("Workspace panel must list task 4", "return e2e.dashboard_row(4) ~= nil")
+  wait_for("The panel lists task 4", "return e2e.dashboard_row(4) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(4), 0 })")
   keys("p")
   wait_for("The fourth task must be prepared without starting",
@@ -289,6 +291,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   local old_job = lua("return e2e.job(1).channel")
   keys("<Space>aw")
   wait_for("Panel", "return e2e.dashboard_row(1) ~= nil")
+  wait_for("The panel lists task 1", "return e2e.dashboard_row(1) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(1), 0 })")
   keys("R")
   wait_for("Restart asks before stopping a running agent", "local p = Snacks.picker.get()[1]; return p ~= nil and p:count() == 2")
@@ -323,6 +326,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   step("stop task 2 from the dashboard, then start the queued task 4")
   keys("<Esc><Space>aw")
   wait_for("Dashboard", "return e2e.dashboard_row(2) ~= nil")
+  wait_for("The panel lists task 2", "return e2e.dashboard_row(2) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(2), 0 })")
   keys("x")
   wait_for("Task 2 must stop and release its slot", [[
@@ -334,6 +338,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   assert(uv.fs_stat(repo .. "-worktrees/task-2/AGENT_RESULT.md"), "Stopping keeps the agent's work")
   keys("<Esc><Space>aw")
   wait_for("Dashboard", "return e2e.dashboard_row(4) ~= nil")
+  wait_for("The panel lists task 4", "return e2e.dashboard_row(4) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(4), 0 })")
   keys("p")
   wait_for("Task 4 must take the free slot", [[
@@ -350,6 +355,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
     local row = e2e.dashboard_row(4)
     return row ~= nil and e2e.float_lines("Task Workspaces")[row]:find("no changes", 1, true) ~= nil
   ]])
+  wait_for("The panel lists task 4", "return e2e.dashboard_row(4) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(4), 0 })")
   keys("c")
   wait_for("c asks task 4's own agent to continue and submits it", [[
@@ -445,6 +451,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
     "return vim.b.taskbay_task ~= nil and vim.b.taskbay_task.target.number == 1")
   keys("<Esc><Space>aw")
   wait_for("Panel", "return e2e.dashboard_row(1) ~= nil")
+  wait_for("The panel lists task 1", "return e2e.dashboard_row(1) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(1), 0 })")
   keys("<CR>")
   wait_for("Enter opens a stopped task's tab without starting pi",
@@ -459,6 +466,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   wait_for("Task 1 stops", "return e2e.job(1).exited")
   keys("<C-\\><C-n><Esc><Space>aw")
   wait_for("Dashboard", "return e2e.dashboard_row(3) ~= nil")
+  wait_for("The panel lists task 3", "return e2e.dashboard_row(3) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(3), 0 })")
   keys("p")
   wait_for("p resumes task 3 in the new editor", [[
@@ -473,6 +481,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   wait_for("Task 3 stops", "return e2e.job(3).exited")
   keys("<Esc><Space>aw")
   wait_for("Dashboard", "return e2e.dashboard_row(3) ~= nil")
+  wait_for("The panel lists task 3", "return e2e.dashboard_row(3) ~= nil")
   lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(3), 0 })")
 
   step("m in the panel finishes task 3: stops pi, commits, merges into main, marks finished")

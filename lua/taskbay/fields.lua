@@ -190,7 +190,7 @@ function M.open(target)
             -- Parse the editable section, then persist through the write path
             -- captured at render, which re-reads storage (external edits are
             -- never overwritten; snapshots stay verbatim).
-            local values = M.values(vim.api.nvim_buf_get_lines(buf, 1, -1, false))
+            local values = M.values(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) -- M.values skips # lines
             fields.write(values)
             vim.bo[buf].modified = false
             vim.notify("Saved fields for " .. tasks.label(target), vim.log.levels.INFO)
