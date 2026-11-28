@@ -8,6 +8,7 @@ All notable changes to taskbay.nvim. Versions follow [Semantic Versioning](https
 
 - Opening a changed file from the diff picker takes its name literally. Before, backticks in a file name ran a shell command, and `%`, `#` and `$VAR` were expanded, so the wrong file opened ([#2](https://github.com/jacobandresen/taskbay.nvim/issues/2)).
 - A task tab opens in its worktree even when the repository's path contains `%` or `#` (such as `c#-project`). Before, opening it failed with E499.
+- Errors raised after taskbay waited, for example after stopping an agent, are shown again. Before, deleting, finishing or restarting a task could stop halfway without a message ([#5](https://github.com/jacobandresen/taskbay.nvim/issues/5)).
 
 ## [0.1.1] - 2026-11-28
 

@@ -529,7 +529,8 @@ function M.task_hash(task) return vim.fn.sha256((task.title or "") .. "\0" .. (t
 
 function M.sleep(ms)
   local thread = coroutine.running()
-  vim.defer_fn(function() coroutine.resume(thread) end, ms)
+  -- Through resume(), so an error raised after the wait is shown like any other task error.
+  vim.defer_fn(function() resume(thread) end, ms)
   coroutine.yield()
 end
 

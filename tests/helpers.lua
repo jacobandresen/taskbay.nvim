@@ -23,8 +23,8 @@ end)
 
 T.case("reported sees errors core.task shows, and misses swallowed ones", function()
   T.reported(function() error("shown to the user", 0) end, "shown to the user")
-  -- An error after core.sleep is not shown today, so reported must fail on it.
-  local ok = pcall(T.reported, function() core.sleep(1) error("after sleep", 0) end, "after sleep", 500)
+  -- An error the code catches itself never reaches the user, so reported must fail on it.
+  local ok = pcall(T.reported, function() pcall(error, "swallowed", 0) end, "swallowed", 500)
   assert(not ok, "reported must fail when the error never reaches the user")
 end)
 
