@@ -28,7 +28,8 @@ local function names(list, key) return vim.tbl_map(function(entry) return entry[
 
 function M.normalise(raw)
   return {
-    number = raw.number, title = raw.title, body = raw.body or "", url = raw.url,
+    -- Issues written in a browser can have CRLF line endings; tasks use \n.
+    number = raw.number, title = raw.title and (raw.title:gsub("\r", "")), body = ((raw.body or ""):gsub("\r\n", "\n")), url = raw.url,
     state = (raw.state or "open"):lower(), -- gh reports OPEN / CLOSED
     labels = names(raw.labels, "name"), assignees = names(raw.assignees, "login"),
     milestone = raw.milestone and raw.milestone.title, author = raw.author and raw.author.login,

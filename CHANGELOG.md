@@ -2,6 +2,17 @@
 
 All notable changes to taskbay.nvim. Versions follow [Semantic Versioning](https://semver.org).
 
+## [0.1.4] - 2026-11-28
+
+### Fixed
+
+- Saving the Fields tab reads every line. Before, its first line was skipped, so labels on line 1 were dropped ([#8](https://github.com/jacobandresen/taskbay.nvim/issues/8)).
+- Sent text containing an end-of-paste sequence (`ESC[201~`) is pasted whole. Before, the paste ended early and the rest was typed into the agent as keys ([#12](https://github.com/jacobandresen/taskbay.nvim/issues/12)).
+- A newly opened panel shows only the current repository's new tasks. Before, it briefly showed, and let keys act on, the previous repository's ([#15](https://github.com/jacobandresen/taskbay.nvim/issues/15)).
+- When publishing a GitHub draft changes the text and the state and only the state change fails, a retry publishes the state change. Before, every retry was blocked with "Issue changed on GitHub" ([#16](https://github.com/jacobandresen/taskbay.nvim/issues/16)).
+- A lock file (`owner.json`) is written in one step, and an empty or corrupt one left by a crash can be recovered. Before, the task could not start until the file was deleted by hand ([#18](https://github.com/jacobandresen/taskbay.nvim/issues/18)).
+- GitHub issues with CRLF line endings are read with plain newlines. Before, task files showed `^M` on every body line ([#19](https://github.com/jacobandresen/taskbay.nvim/issues/19)).
+
 ## [0.1.3] - 2026-11-28
 
 ### Fixed
@@ -35,6 +46,7 @@ All notable changes to taskbay.nvim. Versions follow [Semantic Versioning](https
 
 First release.
 
+[0.1.4]: https://github.com/jacobandresen/taskbay.nvim/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/jacobandresen/taskbay.nvim/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jacobandresen/taskbay.nvim/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jacobandresen/taskbay.nvim/compare/v0.1.0...v0.1.1

@@ -354,6 +354,8 @@ function M.dashboard()
     vim.api.nvim_set_current_win(vim.fn.win_findbuf(dashboard)[1])
     return reload()
   end
+  -- A new panel may be for another repository: draw no stale rows before they are reloaded.
+  pending = { items = {} }
   dashboard = vim.api.nvim_create_buf(false, true)
   vim.bo[dashboard].bufhidden = "wipe"
   vim.bo[dashboard].filetype = "taskbay"

@@ -4,6 +4,10 @@ local M = {}
 
 local function command() return require("taskbay.core").agent().terminal() end
 
+-- Bracketed paste of text. An end-of-paste marker inside the text would end the paste early and
+-- type the rest as keys, so it is removed.
+function M.bracketed(text) return "\27[200~" .. (text:gsub("\27%[201~", "")) .. "\27[201~" end
+
 local function opts()
   local cwd = require("taskbay.core").root()
   -- Inside the agent's own terminal, keep the directory it was opened with: Snacks finds a terminal
@@ -114,7 +118,7 @@ function M.send(visual)
     vim.bo[source].filetype,
     content
   )
-  vim.api.nvim_chan_send(job and job.channel or vim.bo[term.buf].channel, "\27[200~" .. text .. "\27[201~")
+  vim.api.nvim_chan_send(job and job.channel or vim.bo[term.buf].channel, M.bracketed(text))
   if workspace then
     core.show(workspace)
   else
@@ -132,7 +136,7 @@ function M.review()
     return vim.notify("The agent has not reported its active model yet; inspect its terminal", vim.log.levels.WARN)
   end
   local text = core.agent().review(job.model)
-  vim.api.nvim_chan_send(job.channel, "\27[200~" .. text .. "\27[201~")
+  vim.api.nvim_chan_send(job.channel, M.bracketed(text))
   core.show(workspace)
 end
 
