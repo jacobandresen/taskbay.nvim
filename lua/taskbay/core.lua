@@ -785,6 +785,9 @@ function M.finish(workspace)
   if running then
     assert(M.stop_wait(workspace, job), "The agent did not stop; inspect its terminal before finishing")
   end
+  -- Count again: files can change while the dialog is open or before the agent has stopped.
+  count, status_error = changed_count(workspace.path)
+  assert(count, "Cannot inspect worktree status: " .. tostring(status_error))
   if count > 0 then
     git(workspace.path, "add", "-A")
     git(workspace.path, "commit", "-m", tasks.label(workspace))
