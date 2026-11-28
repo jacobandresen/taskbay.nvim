@@ -92,22 +92,34 @@ local function number(name)
   return value
 end
 
-local function task_files(target)
+-- problems: when given, malformed entries are recorded there and skipped instead of raising.
+local function task_files(target, problems)
   local directory, files, seen, sidecars = task_directory(target), {}, {}, {}
+  local function check(condition, message)
+    if condition then return true end
+    if not problems then error(message, 0) end
+    problems[#problems + 1] = message
+    return false
+  end
   if not vim.uv.fs_stat(directory) then return files end
   for name, kind in vim.fs.dir(directory) do
-    local id = number(name)
+    local parsed, id = pcall(number, name)
+    if not parsed then
+      check(false, tostring(id))
+      id = nil
+    end
     if id and (kind == "file" or kind == "link") then
-      assert(id > 0 and not seen[id], "Invalid or duplicate local task ID: " .. name)
-      seen[id] = true
-      files[#files + 1] = { number = id, task_file = name }
+      if check(id > 0 and not seen[id], "Invalid or duplicate local task ID: " .. name) then
+        seen[id] = true
+        files[#files + 1] = { number = id, task_file = name }
+      end
     elseif name:match("^(%d+)%.json$") then
       sidecars[tonumber(name:match("^(%d+)"))] = name
     end
   end
   -- A metadata sidecar without its Markdown file means the task was mangled.
   for id, name in pairs(sidecars) do
-    assert(seen[id], "Task metadata " .. name .. " has no 'NNN-...' Markdown file")
+    check(seen[id], "Task metadata " .. name .. " has no 'NNN-...' Markdown file")
   end
   return files
 end
@@ -143,18 +155,23 @@ providers["local"] = {
     task.url, task.task_file, task.meta = path, vim.fs.basename(path), M.get_meta(target)
     return task
   end,
+  -- Returns the readable tasks, and a list of problems with the files that were skipped.
   list = function(repo, query, limit)
-    local items = {}
-    for _, item in ipairs(task_files(repo)) do
+    local items, problems = {}, {}
+    for _, item in ipairs(task_files(repo, problems)) do
       item.source, item.task_root, item.repo, item.host = "local", repo.root, repo.repo, "local"
-      local task = providers["local"].get(item)
-      item.title, item.url, item.meta, item.actions = task.title, task.url, task.meta, M.actions(task)
-      if not query or query == "" or (task.title .. "\n" .. task.body):lower():find(query:lower(), 1, true) then
-        items[#items + 1] = item
-        if #items >= limit then break end
+      local ok, task = pcall(providers["local"].get, item)
+      if not ok then
+        problems[#problems + 1] = item.task_file .. ": " .. tostring(task)
+      else
+        item.title, item.url, item.meta, item.actions = task.title, task.url, task.meta, M.actions(task)
+        if not query or query == "" or (task.title .. "\n" .. task.body):lower():find(query:lower(), 1, true) then
+          items[#items + 1] = item
+          if #items >= limit then break end
+        end
       end
     end
-    return items
+    return items, problems
   end,
   update = function(target, title, body)
     core().write(M.file(target), M.text(title, body))
@@ -168,7 +185,9 @@ providers["local"] = {
       "Task creation is locked; retry or inspect " .. lock_path)
     local ok, item = pcall(function()
       local files = task_files(repo)
-      local id = #files > 0 and files[#files].number + 1 or 1
+      -- The numeric maximum: directory order is not numeric order (1000-b.md sorts before 999-a.md).
+      local id = 1
+      for _, file in ipairs(files) do id = math.max(id, file.number + 1) end
       local task = { source = "local", number = id, task_root = repo.root,
         task_file = ("%03d-%s.md"):format(id, slug(title)), title = title, repo = repo.repo, host = "local", path = repo.root }
       local path = directory .. "/" .. task.task_file

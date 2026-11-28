@@ -140,7 +140,6 @@ class GuardTest(unittest.TestCase):
             {"name": "launch tool", "input": valid, "tool": "subagent_launch", "expect": "block"},
         ])
 
-    @unittest.expectedFailure  # #11: the guard checks fields the subagent tool no longer uses
     def test_blocks_every_schema_field_not_allowed(self):
         schema, _ = self.probe([])
         sample = "x"

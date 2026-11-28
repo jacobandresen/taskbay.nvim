@@ -83,6 +83,8 @@ function M.review(workspace, scope)
         end
         picker:close()
         if workspace then core.open(workspace) end
+        -- The agent's window is pinned to its terminal: open the file beside it instead.
+        if vim.wo.winfixbuf or vim.bo.buftype == "terminal" then vim.cmd("botright vsplit") end
         -- magic.file = false: the name is taken literally (no backtick shell commands, no %, # or $VAR).
         if item then vim.api.nvim_cmd({ cmd = "edit", args = { path .. "/" .. item.file }, magic = { file = false } }, {}) end
       end,

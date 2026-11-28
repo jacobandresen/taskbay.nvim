@@ -69,14 +69,19 @@ export default async function (pi: ExtensionAPI) {
     publish(ctx);
   });
 
-  // Only the foreground, single-child entry point belongs to this UI.
+  // Only the foreground, single-child entry point belongs to this UI: these are the only fields a
+  // subagent call may set. Everything else (workflow, action, options, ...) is blocked.
+  const ALLOWED_FIELDS = new Set(["agent", "task", "async", "model", "cwd", "worktree"]);
   pi.on("tool_call", (event, ctx) => {
     if (event.toolName !== "subagent" && event.toolName !== "subagent_launch") return;
     const input = event.input as Record<string, unknown>;
-    if (event.toolName === "subagent_launch" || typeof input.agent !== "string"
-      || input.async !== false || input.workflowScript !== undefined || input.chain !== undefined
-      || input.parallel !== undefined || (input.worktree !== undefined && input.worktree !== false)
-      || input.machine !== undefined || (input.cwd !== undefined && input.cwd !== ctx.cwd)) {
+    // An allowlist, so fields pi-subagents adds later are blocked until someone decides to allow them.
+    // Unset values count as absent: some models send every optional field as null or "null".
+    const unknown = Object.entries(input)
+      .filter(([key, value]) => value !== undefined && value !== null && value !== "null" && !ALLOWED_FIELDS.has(key));
+    if (event.toolName === "subagent_launch" || unknown.length > 0 || typeof input.agent !== "string"
+      || input.async !== false || (input.worktree !== undefined && input.worktree !== false)
+      || (input.cwd !== undefined && input.cwd !== ctx.cwd)) {
       return { block: true, reason: "Issue tabs support one foreground subagent per call: set agent, async: false, the current cwd, and an explicit model. No workflow scripts, background jobs, nested launches, or managed worktrees." };
     }
     if (!expectedModel) {

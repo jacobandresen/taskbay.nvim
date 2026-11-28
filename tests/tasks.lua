@@ -89,7 +89,10 @@ T.case("offline providers, safe files, editing, new-task launch and session resu
   expect_error(function() tasks.get_meta(c) end, "one JSON object")
   assert(vim.uv.fs_unlink(tasks.meta_path(c)))
   core.write(repo.root .. "/.tasks/999.json", "{}")
-  expect_error(function() tasks.list(repo) end, "metadata 999.json has no")
+  -- Listing skips and reports a malformed entry; creating a task still refuses it.
+  local listed, problems = tasks.list(repo)
+  assert(#listed == 3 and problems[1]:find("metadata 999.json has no", 1, true), vim.inspect(problems))
+  expect_error(function() tasks.create(repo, "Blocked") end, "metadata 999.json has no")
   assert(vim.uv.fs_unlink(repo.root .. "/.tasks/999.json"))
   assert(next(tasks.get(a).meta) == nil, "Tasks without a sidecar read as empty metadata")
   tasks.delete(c)
@@ -103,7 +106,9 @@ T.case("offline providers, safe files, editing, new-task launch and session resu
   assert(stale.title == "Resumable search", "A stale remembered filename must be re-scanned by its ID")
   local invalid = repo.root .. "/.tasks/9007199254740992-too-large.md"
   core.write(invalid, "# Invalid\n\nBody\n")
-  expect_error(function() tasks.list(repo) end, "Invalid task ID")
+  local _, invalid_problems = tasks.list(repo)
+  assert(invalid_problems[1]:find("Invalid task ID", 1, true), vim.inspect(invalid_problems))
+  expect_error(function() tasks.create(repo, "Blocked") end, "Invalid task ID")
   assert(vim.uv.fs_unlink(invalid))
   core.write(temp .. "/outside.md", "# Outside\n\nDo not edit\n")
   local escape = repo.root .. "/.tasks/999-escape.md"
