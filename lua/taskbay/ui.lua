@@ -168,12 +168,20 @@ local function entries()
   return list
 end
 -- Best effort: the panel must open even outside Git or with an unreadable .tasks directory.
+-- Malformed task files are skipped and reported, once for each new set of problems.
+local reported_problems
 local function load_pending()
   local ok, result = pcall(function()
     local repo = core.repository(core.root(), "local")
-    return { repo = repo, items = tasks.list(repo, nil, 200) }
+    local items, problems = tasks.list(repo, nil, 200)
+    return { repo = repo, items = items, problems = problems or {} }
   end)
   pending = ok and result or { items = {} }
+  local problems = table.concat(pending.problems or {}, "\n")
+  if problems ~= "" and problems ~= reported_problems then
+    vim.notify("Skipped malformed task files in .tasks/:\n" .. problems, vim.log.levels.WARN, { title = "Taskbay" })
+  end
+  reported_problems = problems
 end
 local function start_pending(entry)
   local item = entry.pending

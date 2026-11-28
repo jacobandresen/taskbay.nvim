@@ -5,8 +5,15 @@ local M = {}
 local function command() return require("taskbay.core").agent().terminal() end
 
 local function opts()
+  local cwd = require("taskbay.core").root()
+  -- Inside the agent's own terminal, keep the directory it was opened with: Snacks finds a terminal
+  -- by command, directory and count, and the terminal buffer's own root can differ (#25, #14).
+  local term = vim.b.snacks_terminal
+  if vim.bo.buftype == "terminal" and type(term) == "table" and term.cwd and vim.deep_equal(term.cmd, command()) then
+    cwd = term.cwd
+  end
   return {
-    cwd = require("taskbay.core").root(),
+    cwd = cwd,
     count = 1,
     win = {
       position = "right",

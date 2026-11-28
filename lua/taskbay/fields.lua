@@ -177,6 +177,7 @@ function M.open(target)
     local lines = M.render(target, fields)
     local name = "task://fields/" .. vim.fn.sha256(identity(target))
     local buf = vim.fn.bufnr(name)
+    local existing = buf >= 0
     if buf < 0 then
       buf = vim.api.nvim_create_buf(true, false)
       vim.bo[buf].buftype, vim.bo[buf].bufhidden, vim.bo[buf].swapfile = "acwrite", "hide", false
@@ -202,9 +203,11 @@ function M.open(target)
       })
     end
     -- Fresh render on every open; the write path re-reads storage, so external
-    -- edits are never overwritten by a stale buffer.
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    vim.bo[buf].modified = false
+    -- edits are never overwritten by a stale buffer. Unsaved edits in the buffer are kept.
+    if not (existing and vim.bo[buf].modified) then
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.bo[buf].modified = false
+    end
     vim.bo[buf].filetype = "text"
     vim.api.nvim_set_current_buf(buf)
     -- Tab flips back to the Task tab, matching Tab in the Task tab; q also returns.

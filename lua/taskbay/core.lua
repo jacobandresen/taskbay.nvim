@@ -741,7 +741,19 @@ function M.stop_wait(workspace, job)
 end
 
 -- Start the task again from its current description in a new conversation; the worktree is kept.
+-- Another editor's agent owns the workspace: its owner.json names a live process with another token.
+local function assert_not_external(workspace, action)
+  local job = M.jobs[workspace.id]
+  if job and not job.exited then return end
+  local path = directory(workspace) .. "/owner.json"
+  if not uv.fs_stat(path) then return end
+  local ok, owner = pcall(M.read_json, path)
+  assert(not (ok and type(owner) == "table" and owner.token ~= token and (alive(owner.pid) or alive(owner.job_pid))),
+    "Another Neovim runs " .. tasks.label(workspace) .. "'s agent; " .. action .. " it there")
+end
+
 function M.restart(workspace)
+  assert_not_external(workspace, "restart")
   local job = M.jobs[workspace.id]
   if job and not job.exited then
     if M.choose({ "Cancel", "Restart with the current task" }, "Restart " .. tasks.label(workspace)
@@ -750,12 +762,19 @@ function M.restart(workspace)
     end
     assert(M.stop_wait(workspace, job), "The agent did not stop; inspect its terminal before restarting")
   end
+  -- A restart that cannot start keeps the saved conversation and the finished mark.
+  local kept = { workspace.restarts, workspace.finished, workspace.session, workspace.session_file, workspace.started }
   workspace.restarts = (workspace.restarts or 0) + 1
   workspace.finished = nil -- a restart makes the task unfinished again
   workspace.session = session_name(workspace) .. "-r" .. workspace.restarts
   workspace.session_file, workspace.started = nil, nil
   M.save(workspace)
-  M.start(workspace)
+  local ok, err = pcall(M.start, workspace)
+  if not ok then
+    workspace.restarts, workspace.finished, workspace.session, workspace.session_file, workspace.started = unpack(kept, 1, 5)
+    M.save(workspace)
+    error(err, 0)
+  end
 end
 
 -- Finish a task: stop the agent if it is still running, commit whatever the agent left
@@ -763,6 +782,7 @@ end
 -- and mark it finished. A human decision from the panel (m);
 -- agents never merge.
 function M.finish(workspace)
+  assert_not_external(workspace, "finish")
   M.validate(workspace)
   assert(workspace.source == "local", "Only local tasks are finished this way")
   local job = M.jobs[workspace.id]
@@ -817,27 +837,39 @@ end
 
 function M.delete(workspace)
   assert(workspace.source == "local", "Only local tasks can be deleted")
+  assert_not_external(workspace, "delete")
   local job = M.jobs[workspace.id]
-  -- The caller has already confirmed the deletion; a running agent is stopped first
-  -- (its worktree changes were kept only until this point anyway).
-  if job and not job.exited then
-    assert(M.stop_wait(workspace, job), "The agent did not stop; inspect its terminal, then delete again")
-  end
   -- The worktree or task file may already be gone (removed externally, or a
   -- partially failed delete); tolerate that so a stale row can always be cleaned.
   local ok_task, task_path = pcall(tasks.file, workspace)
   local missing_worktree = not uv.fs_stat(workspace.path)
+  -- Every check runs before anything changes, so a refused delete leaves the agent running.
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if ok_task and vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_name(buf) == task_path then
       assert(not vim.bo[buf].modified, "Save or discard modified task buffers before deleting " .. tasks.label(workspace))
     end
   end
+  local doomed = {}
   for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
     if vim.t[tab].taskbay_workspace == workspace.id then
-      for _, buf in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
-        local buffer = vim.api.nvim_win_get_buf(buf)
-        assert(not vim.bo[buffer].modified, "Save or discard modified files before deleting " .. tasks.label(workspace))
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+        local buffer = vim.api.nvim_win_get_buf(win)
+        -- The agent's own terminal goes with the task.
+        assert(vim.bo[buffer].buftype == "terminal" or not vim.bo[buffer].modified,
+          "Save or discard modified files before deleting " .. tasks.label(workspace))
       end
+      doomed[#doomed + 1] = tab
+    end
+  end
+  -- The caller has already confirmed the deletion; a running agent is stopped first
+  -- (its worktree changes were kept only until this point anyway).
+  if job and not job.exited then
+    assert(M.stop_wait(workspace, job), "The agent did not stop; inspect its terminal, then delete again")
+  end
+  -- Neovim cannot close its last tab: leave an empty one behind.
+  if #doomed > 0 and #doomed == #vim.api.nvim_list_tabpages() then vim.cmd.tabnew() end
+  for _, tab in ipairs(doomed) do
+    if vim.api.nvim_tabpage_is_valid(tab) then
       vim.api.nvim_set_current_tabpage(tab)
       vim.cmd("tabclose!")
     end
