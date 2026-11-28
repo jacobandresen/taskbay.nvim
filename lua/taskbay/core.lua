@@ -383,7 +383,7 @@ function M.open(workspace)
   vim.cmd.tabnew()
   vim.t.taskbay_workspace = workspace.id
   require("taskbay.ui").tabs()
-  vim.api.nvim_cmd({ cmd = "tcd", args = { workspace.path } }, {})
+  vim.api.nvim_cmd({ cmd = "tcd", args = { workspace.path }, magic = { file = false } }, {}) -- a literal path
   local buf = vim.api.nvim_get_current_buf()
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
