@@ -1,49 +1,7 @@
--- Run: timeout 30 nvim --headless -u NONE -i NONE -l tests/layout.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp, "p")
-local function command(...)
-  local result = vim.system({ ... }, { cwd = temp, text = true }):wait()
-  assert(result.code == 0, result.stderr)
-  return vim.trim(result.stdout)
-end
-command("git", "init", "-b", "main")
-command("git", "config", "user.name", "Test")
-command("git", "config", "user.email", "test@example.invalid")
-vim.fn.writefile({ "before" }, temp .. "/file.txt")
-command("git", "add", ".")
-command("git", "commit", "-m", "Initial")
-vim.fn.writefile({ "after" }, temp .. "/file.txt")
-local uv = vim.uv
-local input, output, errors = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
-local unpacker = vim.mpack.Unpacker()
-local replies, sequence, stderr = {}, 0, {}
-local process = assert(uv.spawn("nvim", {
-  args = { "--embed", "--headless", "-u", "NONE", "-i", "NONE" },
-  stdio = { input, output, errors },
-}, function() end))
-output:read_start(function(err, data)
-  assert(not err, err)
-  if not data then return end
-  local position = 1
-  while position <= #data do
-    local message
-    message, position = unpacker(data, position)
-    if message and message[1] == 1 then replies[message[2]] = message end
-  end
-end)
-errors:read_start(function(_, data)
-  if data then stderr[#stderr + 1] = data end
-end)
-local function rpc(method, ...)
-  sequence = sequence + 1
-  input:write(vim.mpack.encode({ 0, sequence, method, { ... } }))
-  assert(vim.wait(5000, function() return replies[sequence] ~= nil end, 10), method .. ": " .. table.concat(stderr) .. "\n" .. vim.inspect({ ... }):sub(1, 300))
-  local reply = replies[sequence]
-  if reply[3] ~= vim.NIL then error(vim.inspect(reply[3])) end
-  return reply[4]
-end
-local function lua(code, args) return rpc("nvim_exec_lua", code, args or {}) end
+-- Window geometry, pickers and the panel in an embedded editor (tests/harness.lua).
+-- Run: timeout 60 nvim --headless -u NONE -i NONE -l tests/layout.lua
+local H = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/harness.lua")({ name = "taskbay-layout" })
+local rpc, lua, uv = H.rpc, H.lua, vim.uv
 -- Poll the child without nesting vim.wait, so a stuck rpc() fails instead of hanging.
 local function poll(timeout, condition)
   local deadline = uv.now() + timeout
@@ -54,29 +12,27 @@ local function poll(timeout, condition)
   end
   return true
 end
-local ok, failure = pcall(function()
-  rpc("nvim_ui_attach", 140, 40, { rgb = true, ext_linegrid = true })
-  lua(
-    [[
-    local root, snacks, temp = ...
-    vim.g.mapleader = " "
-    vim.opt.rtp:prepend(root)
-    vim.opt.rtp:append(snacks)
-    _G.Snacks = require("snacks")
-    Snacks.setup({ picker = { enabled = true }, notifier = { enabled = false } })
+-- A committed file with a worktree change, so the diff picker has something to preview.
+vim.fn.writefile({ "before" }, H.repo .. "/file.txt")
+H.sh({ "git", "add", "file.txt" })
+H.sh({ "git", "commit", "-m", "Add file.txt" })
+vim.fn.writefile({ "after" }, H.repo .. "/file.txt")
+
+H.run("taskbay layout: diff geometry, live resizing, multiselection, scoped search and dashboard refresh passed", function()
+  H.boot()
+  rpc("nvim_ui_try_resize", 140, 40)
+  lua([[
+    local temp = ...
     local core = require("taskbay.core")
-    vim.g.taskbay = { state_dir = temp .. "/state", remote_enabled = true }
+    vim.g.taskbay = vim.tbl_extend("force", vim.g.taskbay or {}, { state_dir = temp .. "/layout-state", remote_enabled = true })
     _G.LazyVim = { root = setmetatable({ detectors = {}, cache = {} }, { __call = function() return temp end }) }
     _G.workspace = {
       id = "test", path = temp, common = temp .. "/.git", branch = "main",
       repo = "test/repo", number = 42, title = "Readable issue review", base_ref = "main",
     }
     core.workspaces.test = workspace
-    require("taskbay.ui").setup()
     core.open(workspace)
-  ]],
-    { plugin, (vim.env.TASKBAY_SNACKS or (vim.fn.stdpath("data") .. "/lazy/snacks.nvim")), temp }
-  )
+  ]], H.repo)
   lua([[
     local core = require("taskbay.core")
     _G.pi_terminal_buf = vim.api.nvim_create_buf(false, true)
@@ -88,14 +44,6 @@ local ok, failure = pcall(function()
     core.show(workspace)
   ]])
   assert(poll(3000, function() return rpc("nvim_get_mode").mode == "t" end))
-  lua([[
-    local agent = vim.fn.win_findbuf(pi_terminal_buf)[1]
-    assert(vim.wo[agent].winfixbuf, "The agent window must keep its terminal")
-    -- Snacks' explorer and pickers open files in the task window, not over the agent.
-    local main = require("snacks.picker.core.main").new():find()
-    assert(main ~= agent and vim.api.nvim_win_get_buf(main) ~= pi_terminal_buf,
-      "Files picked in the task tab must not replace the agent terminal")
-  ]])
   rpc("nvim_input", "<F6>")
   assert(poll(3000, function() return lua("return #vim.fn.win_findbuf(pi_terminal_buf) == 0") end),
     "F6 must hide Pi directly from terminal input")
@@ -358,14 +306,3 @@ local ok, failure = pcall(function()
     core.repository, core.run = original_repository, original_run
   ]])
 end)
-process:kill("sigterm")
-for _, handle in ipairs({ input, output, errors, process }) do
-  if not handle:is_closing() then handle:close() end
-end
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(tostring(failure) .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay layout: diff geometry, live resizing, multiselection, scoped search and dashboard refresh passed")
-vim.cmd("qa!")

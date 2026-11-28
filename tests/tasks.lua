@@ -1,15 +1,11 @@
 -- Run: timeout 60 nvim --headless -u NONE -i NONE -l tests/tasks.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({ name = "tasks" })
+local plugin = T.plugin
 local core = require("taskbay.core")
 local tasks = require("taskbay.store")
 local editor = require("taskbay.editor")
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp .. "/repo", "p")
-vim.g.taskbay = { state_dir = temp .. "/state", pi = { cmd = plugin .. "/tests/fixtures/pi_stub.py" } }
-local messages = {}
-vim.notify = function(message) messages[#messages + 1] = tostring(message) end
+local temp = T.temp
+local messages = T.messages
 _G.LazyVim = { root = setmetatable({ detectors = {}, cache = {} }, {
   __call = function() return temp .. "/repo" end,
 }) }
@@ -18,33 +14,14 @@ core.run = function(argv, ...)
   assert(argv[1] ~= "gh", "Local tasks must never invoke gh")
   return run(argv, ...)
 end
-local function await(fn)
-  local done, result, failure = false
-  core.task(function()
-    local ok, value = pcall(fn)
-    if ok then result = value else failure = value end
-    done = true
-  end)
-  assert(vim.wait(15000, function() return done end, 10), table.concat(messages, "\n"))
-  assert(not failure, failure)
-  return result
-end
-local function expect_error(fn, pattern)
-  local ok, err = pcall(fn)
-  assert(not ok and tostring(err):find(pattern, 1, true), tostring(err))
-end
+local await, expect_error = T.await, T.fails
 local function git(...)
   local args = { ... }
   return vim.trim(await(function() return core.git(temp .. "/repo", unpack(args)) end))
 end
 
-local ok, failure = xpcall(function()
-  git("init", "-b", "main")
-  git("config", "user.name", "Test")
-  git("config", "user.email", "test@example.invalid")
-  core.write(temp .. "/repo/code.txt", "Original\n")
-  git("add", "code.txt")
-  git("commit", "-m", "Initial")
+T.create_repository("repo", { ["code.txt"] = { "Original" } })
+T.case("offline providers, safe files, editing, new-task launch and session resume", function()
   local repo = await(function() return core.repository(temp .. "/repo") end)
   assert(repo.source == "local" and repo.task_root == temp .. "/repo")
   for _, source in ipairs({ "other", false }) do
@@ -510,7 +487,7 @@ local ok, failure = xpcall(function()
   local count = #messages
   vim.cmd("TaskbayImport")
   assert(#messages > count and messages[#messages]:find("GitHub integration is disabled", 1, true))
-end, debug.traceback)
+end)
 
 for id, job in pairs(core.jobs) do
   if not job.exited then core.stop(core.workspaces[id]) end
@@ -519,10 +496,4 @@ vim.wait(4000, function()
   for _, job in pairs(core.jobs) do if not job.exited then return false end end
   return true
 end, 10)
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(tostring(failure) .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay tasks: offline providers, safe files, editing, new-task launch and session resume passed")
-vim.cmd("qa!")
+T.done("taskbay tasks: offline providers, safe files, editing, new-task launch and session resume passed")

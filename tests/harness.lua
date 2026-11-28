@@ -47,6 +47,18 @@ vim.fn.writefile(dotfiles and {
 
 local env = vim.fn.environ()
 env.PATH = temp .. "/bin:" .. env.PATH
+-- opts.faults: put tests/fixtures/fail.py in front of gh and git; the editor's TASKBAY_FAIL and
+-- TASKBAY_SLOW (set with H.lua("vim.env.TASKBAY_FAIL = ...")) then fail or delay matching calls.
+if opts.faults then
+  local wrappers = temp .. "/faults"
+  vim.fn.mkdir(wrappers, "p")
+  for _, name in ipairs({ "gh", "git" }) do
+    vim.fn.writefile({ "#!/bin/sh", "exec python3 " .. vim.fn.shellescape(plugin .. "/tests/fixtures/fail.py") .. " "
+      .. vim.fn.shellescape(wrappers) .. " " .. name .. ' "$@"' }, wrappers .. "/" .. name)
+    assert(uv.fs_chmod(wrappers .. "/" .. name, 493))
+  end
+  env.PATH = wrappers .. ":" .. env.PATH
+end
 env.XDG_DATA_HOME, env.XDG_STATE_HOME, env.XDG_CACHE_HOME = temp .. "/data", temp .. "/state", temp .. "/cache"
 env.NVIM_LOG_FILE, env.PI_E2E_LOG, env.PI_E2E_RELEASE = temp .. "/nvim.log", log_file, release
 for key, value in pairs(opts.env or {}) do env[key] = value end
@@ -67,14 +79,14 @@ local function close_editor()
     if handle and not handle:is_closing() then handle:close() end
   end
 end
-local function start_editor()
+local function start_editor(cwd)
   close_editor()
   input, output, errors = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
   local unpacker = vim.mpack.Unpacker()
   replies, stderr, exited = {}, {}, nil
   process = assert(uv.spawn("nvim", {
     args = { "--embed", "-i", "NONE", "-u", temp .. "/init.lua", "README.md" },
-    cwd = repo, env = env_list, stdio = { input, output, errors },
+    cwd = cwd or repo, env = env_list, stdio = { input, output, errors },
   }, function(code) exited = code end))
   output:read_start(function(err, data)
     assert(not err, err)
@@ -163,6 +175,8 @@ local function agents()
 end
 -- Choose from a vim.ui.select picker once the async matcher has settled on the intended item.
 local function pick(filter, expected)
+  -- Typed before the picker opens, the filter would reach whatever window has focus.
+  wait_for("A picker must open for " .. expected, "return Snacks.picker.get()[1] ~= nil", 5000)
   keys(filter)
   wait_for("Picker must settle on " .. expected, [[
     local p = Snacks.picker.get()[1]
@@ -171,7 +185,6 @@ local function pick(filter, expected)
   ]], 5000, expected)
   keys("<CR>")
 end
-local function step(name) if verbose then print("e2e: " .. name) end end
 
 -- Child-side helpers for inspecting editor state.
 local helpers = [[
@@ -231,8 +244,134 @@ local helpers = [[
   end
 ]]
 
-local function boot()
-  start_editor()
+-- Checks between steps: every window that shows an agent's terminal is pinned to it (winfixbuf),
+-- and no Neovim error (E123:) or Lua stack trace was shown since the last check, as a notification
+-- or in :messages. H.allow(text) accepts errors containing text, for steps that cause them on purpose.
+local allowed = {}
+local invariants = [[
+  local allowed = ...
+  local core = require("taskbay.core")
+  local problems = {}
+  for _, job in pairs(core.jobs) do
+    if job.buf and vim.api.nvim_buf_is_valid(job.buf) then
+      for _, win in ipairs(vim.fn.win_findbuf(job.buf)) do
+        if not vim.wo[win].winfixbuf then problems[#problems + 1] = "agent window " .. win .. " is not pinned" end
+      end
+    end
+  end
+  local function check(text)
+    if not (text:find("E%d+:") or text:find("stack traceback", 1, true)) then return end
+    for _, pattern in ipairs(allowed) do
+      if text:find(pattern, 1, true) then return end
+    end
+    problems[#problems + 1] = text
+  end
+  for index = (_G.e2e_checked or 0) + 1, #_G.e2e_messages do check(_G.e2e_messages[index]) end
+  _G.e2e_checked = #_G.e2e_messages
+  -- :messages holds only what was displayed; errors caught with pcall never appear there.
+  local history = vim.api.nvim_exec2("messages", { output = true }).output
+  local seen = _G.e2e_history or ""
+  local new = vim.startswith(history, seen) and history:sub(#seen + 1) or history
+  _G.e2e_history = history
+  -- One check for the whole new text: an error and its stack traceback span several lines.
+  if new ~= "" then check(new) end
+  return problems
+]]
+local function check_invariants()
+  local problems = lua(invariants, allowed)
+  assert(#problems == 0, "Invariant broken:\n" .. table.concat(problems, "\n"))
+end
+local function allow(text) allowed[#allowed + 1] = text end
+local function step(name)
+  if process and exited == nil then check_invariants() end
+  if verbose then print("e2e: " .. name) end
+end
+
+-- Arrange the windows into a known awkward state: "agent_only" closes every window in the task
+-- tab except the agent's, "single_tab" closes every tab except the task tab.
+local function layout(kind)
+  lua([[
+    local kind = ...
+    local core = require("taskbay.core")
+    local workspace = core.current()
+    assert(workspace, "H.layout needs a task tab")
+    if kind == "single_tab" then return vim.cmd("tabonly!") end
+    assert(kind == "agent_only", "Unknown layout " .. tostring(kind))
+    local job = assert(core.jobs[workspace.id], "H.layout agent_only needs the task's agent")
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      -- Floating windows (notifications, pickers) are not part of the tab's layout.
+      if vim.api.nvim_win_get_config(win).relative == "" and vim.api.nvim_win_get_buf(win) ~= job.buf then
+        vim.api.nvim_win_close(win, true)
+      end
+    end
+  ]], kind)
+end
+
+-- Another Git repository next to H.repo: files (path -> lines) committed on main. Returns its directory.
+local function create_repository(name, files)
+  local root = temp .. "/" .. name
+  vim.fn.mkdir(root, "p")
+  sh({ "git", "init", "-q", "-b", "main" }, root)
+  sh({ "git", "config", "user.name", "Test" }, root)
+  sh({ "git", "config", "user.email", "test@example.invalid" }, root)
+  for path, lines in pairs(files or { ["README.md"] = { "# " .. name } }) do
+    vim.fn.mkdir(vim.fs.dirname(root .. "/" .. path), "p")
+    vim.fn.writefile(lines, root .. "/" .. path)
+  end
+  sh({ "git", "add", "-A" }, root)
+  sh({ "git", "commit", "-q", "--allow-empty", "-m", "Initial" }, root)
+  return root
+end
+
+-- Open the panel and put the cursor on task number's row.
+local function panel_row(number)
+  keys("<Esc><Space>aw")
+  wait_for("The panel must list task " .. number, "return e2e.dashboard_row(...) ~= nil", 8000, number)
+  lua("vim.api.nvim_win_set_cursor(0, { e2e.dashboard_row(...), 0 })", number)
+end
+-- Open task number's diff picker and pick file.
+local function diff(number, file)
+  panel_row(number)
+  keys("d")
+  pick(file, file)
+end
+-- Open task number's Fields tab.
+local function fields(number)
+  panel_row(number)
+  keys("f")
+  wait_for("The Fields tab must open", "return vim.api.nvim_buf_get_name(0):find('task://fields/', 1, true) ~= nil")
+end
+
+-- The offline GitHub CLI (tests/fixtures/gh_stub.py) for the editor, seeded with issues (as gh issue
+-- view --json returns them). calls(verb?) returns the argv of every gh call, or only of "issue <verb>".
+local function gh(issues)
+  local dir = temp .. "/gh"
+  vim.fn.mkdir(dir, "p")
+  local seeded = {}
+  for _, issue in ipairs(issues or {}) do seeded[tostring(issue.number)] = issue end
+  vim.fn.writefile({ vim.json.encode({ issues = next(seeded) and seeded or vim.empty_dict() }) }, dir .. "/issues.json")
+  vim.fn.writefile({ "#!/bin/sh", "GH_STUB_DIR=" .. vim.fn.shellescape(dir) .. " exec python3 "
+    .. vim.fn.shellescape(plugin .. "/tests/fixtures/gh_stub.py") .. ' "$@"' }, temp .. "/bin/gh")
+  assert(uv.fs_chmod(temp .. "/bin/gh", 493))
+  local stub = { dir = dir }
+  function stub.issue(number)
+    return vim.json.decode(table.concat(vim.fn.readfile(dir .. "/issues.json"), "\n")).issues[tostring(number)]
+  end
+  function stub.calls(verb)
+    local found = {}
+    local log = dir .. "/calls.jsonl"
+    for _, line in ipairs(vim.fn.filereadable(log) == 1 and vim.fn.readfile(log) or {}) do
+      local argv = vim.json.decode(line).argv
+      if not verb or argv[2] == verb then found[#found + 1] = argv end
+    end
+    return found
+  end
+  return stub
+end
+
+-- boot_opts.cwd: start the editor in another directory than H.repo.
+local function boot(boot_opts)
+  start_editor((boot_opts or {}).cwd)
   rpc("nvim_ui_attach", 160, 45, { rgb = true, ext_linegrid = true })
   wait_for("Editor did not finish starting", [[
     return vim.v.vim_did_enter == 1 and package.loaded["taskbay.ui"] ~= nil
@@ -249,6 +388,8 @@ end
 local H = {
   opts = opts, temp = temp, repo = repo, release = release, sh = sh, rpc = rpc, lua = lua, keys = keys, wait_for = wait_for,
   pick = pick, step = step, agents = agents, messages = messages, boot = boot, close = close_editor,
+  invariants = check_invariants, allow = allow, layout = layout, create_repository = create_repository,
+  diff = diff, fields = fields, gh = gh,
 }
 function H.exited() return exited end
 -- Run the scenario, clean up, report and exit the host editor.

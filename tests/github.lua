@@ -6,33 +6,18 @@ local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 local H = dofile(plugin .. "/tests/harness.lua")({ name = "taskbay-github" })
 local lua, keys, wait_for, pick, step, sh = H.lua, H.keys, H.wait_for, H.pick, H.step, H.sh
 
-local gh_dir = H.temp .. "/gh"
-vim.fn.mkdir(gh_dir, "p")
-vim.fn.writefile({ vim.json.encode({ issues = {
-  ["1"] = {
+local gh = H.gh({
+  {
     number = 1, title = "Fix login", body = "Login fails.", state = "OPEN", url = "https://github.com/octo/project/issues/1",
     labels = { { name = "bug" } }, assignees = { { login = "kate" } }, milestone = { title = "v1" },
     comments = { { author = { login = "kate" }, body = "Seen on mobile" } }, createdAt = "2026-01-01T00:00:00Z",
   },
-  ["2"] = {
+  {
     number = 2, title = "Add dark mode", body = "Users want it.", state = "OPEN", url = "https://github.com/octo/project/issues/2",
     labels = {}, assignees = {}, comments = {},
   },
-} }) }, gh_dir .. "/issues.json")
-vim.fn.writefile({ "#!/bin/sh", "GH_STUB_DIR=" .. vim.fn.shellescape(gh_dir) .. " exec python3 "
-  .. vim.fn.shellescape(plugin .. "/tests/fixtures/gh_stub.py") .. ' "$@"' }, H.temp .. "/bin/gh")
-assert(vim.uv.fs_chmod(H.temp .. "/bin/gh", 493))
-local function issue(number)
-  return vim.json.decode(table.concat(vim.fn.readfile(gh_dir .. "/issues.json"), "\n")).issues[tostring(number)]
-end
-local function calls(verb)
-  local found = {}
-  for _, line in ipairs(vim.fn.filereadable(gh_dir .. "/calls.jsonl") == 1 and vim.fn.readfile(gh_dir .. "/calls.jsonl") or {}) do
-    local argv = vim.json.decode(line).argv
-    if argv[2] == verb then found[#found + 1] = argv end
-  end
-  return found
-end
+})
+local issue, calls = gh.issue, gh.calls
 local function message(text) return "return table.concat(_G.e2e_messages, '\\n'):find(" .. vim.inspect(text) .. ", 1, true) ~= nil" end
 -- Confirmations are vim.ui.select pickers; wait until one offers the choice, then take it.
 local function confirm(filter, choice)
