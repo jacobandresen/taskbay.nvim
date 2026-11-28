@@ -1,18 +1,14 @@
 -- Run: timeout 60 nvim --headless -u NONE -i NONE -l tests/fields.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({
+  name = "fields", settings = { remote_enabled = true },
+})
 local core = require("taskbay.core")
 local tasks = require("taskbay.store")
 local editor = require("taskbay.editor")
 local fields = require("taskbay.fields")
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp .. "/repo", "p")
-vim.g.taskbay = { state_dir = temp .. "/state", remote_enabled = true,
-  pi = { cmd = plugin .. "/tests/fixtures/pi_stub.py" } }
+local temp = T.temp
 _G.LazyVim = { root = setmetatable({}, { __call = function() return temp .. "/repo" end }) }
-local messages = {}
-vim.notify = function(message) messages[#messages + 1] = tostring(message) end
+local messages = T.messages
 local choice = "Cancel"
 core.choose = function() return choice end
 
@@ -39,31 +35,15 @@ core.run = function(argv, cwd, optional, stdin)
   end
   return original_run(argv, cwd, optional, stdin)
 end
-local function await(fn)
-  local done, result, failure
-  core.task(function()
-    local ok, value = pcall(fn)
-    done = true
-    if ok then result = value else failure = value end
-  end)
-  assert(vim.wait(15000, function() return done end, 10), table.concat(messages, "\n"))
-  assert(not failure, failure)
-  return result
-end
+local await = T.await
 local function baseline()
   return vim.json.decode(table.concat(vim.fn.readfile(
     temp .. "/state/issue-drafts/" .. vim.fn.sha256("github.com/test/repo#42") .. "/baseline.json"), "\n"))
 end
 
 local function boom(err) error(debug.traceback(err), 0) end
-local ok, failure = xpcall(function()
-  for _, args in ipairs({
-    { "init", "-b", "main" }, { "config", "user.name", "Test" },
-    { "config", "user.email", "test@example.invalid" },
-  }) do await(function() core.git(temp .. "/repo", unpack(args)) end) end
-  core.write(temp .. "/repo/code.txt", "Original\n")
-  await(function() core.git(temp .. "/repo", "add", "code.txt") end)
-  await(function() core.git(temp .. "/repo", "commit", "-m", "Initial") end)
+T.create_repository("repo", { ["code.txt"] = { "Original" } })
+T.case("minimal task view, sidecar edits, snapshot intact, publish diffs", function()
   local repo = await(function() return core.repository(temp .. "/repo") end)
 
   -- A local task whose sidecar carries an imported-style snapshot and a custom key.
@@ -248,12 +228,6 @@ local ok, failure = xpcall(function()
   vim.cmd("silent write")
   assert(vim.wait(3000, function() return refreshed end, 10), "Saving fields refreshes the task's workspace")
   core.workspaces.probe, core.changed = nil, changed
-end, function(e) return debug.traceback(e) end)
+end)
 
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(debug.traceback(failure) .. "\n\nTRACEBACK:\n" .. tostring(failure) .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay fields: minimal task view, sidecar edits, snapshot intact, publish diffs passed")
-vim.cmd("qa!")
+T.done("taskbay fields: minimal task view, sidecar edits, snapshot intact, publish diffs passed")

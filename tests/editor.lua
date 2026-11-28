@@ -1,14 +1,11 @@
 -- Run: timeout 30 nvim --headless -u NONE -i NONE -l tests/editor.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({
+  name = "editor", settings = { remote_enabled = true },
+})
 local core = require("taskbay.core")
 local editor = require("taskbay.editor")
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp, "p")
-vim.g.taskbay = { state_dir = temp .. "/state", remote_enabled = true }
-local messages, edits = {}, {}
-vim.notify = function(message) messages[#messages + 1] = tostring(message) end
+local temp = T.temp
+local messages, edits = T.messages, {}
 local target = { id = "test", host = "github.com", repo = "test/repo", number = 42, path = temp }
 local other = vim.tbl_extend("force", target, { id = "other", number = 43 })
 core.workspaces[target.id], core.workspaces[other.id] = target, other
@@ -41,7 +38,7 @@ local function expect_message(fn, pattern)
   assert(#messages > count and messages[#messages]:find(pattern, 1, true), table.concat(messages, "\n"))
 end
 
-local ok, failure = pcall(function()
+T.case("local edits, confirmed publication, conflicts, reload and agent routing", function()
   editor.open()
   local buf = vim.api.nvim_get_current_buf()
   local path = vim.api.nvim_buf_get_name(buf)
@@ -141,10 +138,4 @@ local ok, failure = pcall(function()
   assert(vim.trim(output.stdout) == body, "The command runner must pass stdin without shell expansion")
 end)
 
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(tostring(failure) .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay editor: local edits, confirmed publication, conflicts, reload and agent routing passed")
-vim.cmd("qa!")
+T.done("taskbay editor: local edits, confirmed publication, conflicts, reload and agent routing passed")

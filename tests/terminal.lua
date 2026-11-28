@@ -1,9 +1,7 @@
 -- Unit tests for taskbay.terminal with taskbay.core and Snacks stubbed out.
 -- Run: timeout 60 nvim --headless -u NONE -i NONE -l tests/terminal.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
-local root, bin = vim.fn.tempname(), vim.fn.tempname()
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({ name = "terminal" })
+local root, bin = T.temp .. "/root", T.temp .. "/bin"
 vim.fn.mkdir(root, "p")
 vim.fn.mkdir(bin, "p")
 _G.LazyVim = { root = function() return root end }
@@ -154,7 +152,4 @@ core.jobs.w.model = "ollama/m"
 agents.review()
 assert(sent[1].channel == 7 and sent[1].text:find("model: ollama/m and", 1, true) and calls[1] == "show")
 
-vim.fn.delete(root, "rf")
-vim.fn.delete(bin, "rf")
-print("taskbay terminal: toggle, send and review paths covered")
-vim.cmd("qa!")
+T.done("taskbay terminal: toggle, send and review paths covered")

@@ -26,6 +26,7 @@ H.run("taskbay e2e: wrote 4 tasks, ran 3 agents at once, queued a 4th, sent cont
   H.opts.rpc_timeout = rpc_timeout
   assert(not ok and err:find("blocked at a prompt", 1, true) and err:find("e2e-prompt", 1, true), err)
   assert(lua("return 2") == 2, "The editor answers again once the prompt is dismissed")
+  H.allow("e2e-prompt")
 
   step("write three tasks with Space a n")
   for index = 1, 3 do

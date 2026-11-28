@@ -1,53 +1,21 @@
 -- Run: timeout 60 nvim --headless -u NONE -i NONE -l tests/core.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({
+  name = "core", settings = { remote_enabled = true },
+})
+local plugin = T.plugin
 local core = require("taskbay.core")
 local ui = require("taskbay.ui")
 local uv = vim.uv
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp .. "/repo", "p")
-vim.g.taskbay = {
-  state_dir = temp .. "/state", pi = { cmd = plugin .. "/tests/fixtures/pi_stub.py" }, remote_enabled = true,
-}
-local messages = {}
-vim.notify = function(message) messages[#messages + 1] = tostring(message) end
+local temp = T.temp
+local messages = T.messages
 _G.LazyVim = { root = setmetatable({ detectors = {}, cache = {} }, { __call = function() return temp .. "/repo" end }) }
-local function cmd(args, cwd)
-  local result = vim.system(args, { cwd = cwd or temp .. "/repo", text = true }):wait()
-  assert(result.code == 0, result.stderr)
-  return vim.trim(result.stdout)
-end
-local function git(...) return cmd(vim.list_extend({ "git" }, { ... })) end
+local function cmd(args, cwd) return T.sh(args, cwd or temp .. "/repo") end
+local function git(...) return T.git(temp .. "/repo", ...) end
 local function write(path, lines) vim.fn.writefile(lines, path) end
-local function await(fn)
-  local done, failure, result = false
-  core.task(function()
-    local ok, value = pcall(fn)
-    if ok then
-      result = value
-    else
-      failure = value
-    end
-    done = true
-  end)
-  assert(vim.wait(15000, function() return done end, 10), "Timed out: " .. table.concat(messages, "\n"))
-  assert(not failure, failure)
-  return result
-end
-local function expect_error(fn, pattern)
-  local ok, err = pcall(fn)
-  assert(not ok and tostring(err):find(pattern, 1, true), "Expected " .. pattern .. ", got " .. tostring(err))
-end
+local await, expect_error = T.await, T.fails
 
-local ok, failure = pcall(function()
-  git("init", "-b", "main")
-  git("config", "user.email", "test@example.invalid")
-  git("config", "user.name", "Test")
-  write(temp .. "/repo/same name.txt", { "original" })
-  write(temp .. "/repo/rename.txt", { "rename me" })
-  git("add", ".")
-  git("commit", "-m", "Initial")
+T.create_repository("repo", { ["same name.txt"] = { "original" }, ["rename.txt"] = { "rename me" } })
+T.case("routing, Git scopes, lifecycle, context, stop/resume and dashboard", function()
   local sha = git("rev-parse", "HEAD")
   local repo = { root = temp .. "/repo", common = temp .. "/repo/.git", repo = "test/repo", host = "github.com" }
   write(temp .. "/repo/dirty.txt", { "keep main dirty" })
@@ -693,10 +661,4 @@ vim.wait(3000, function()
   end
   return true
 end, 10)
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(tostring(failure) .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay core: routing, Git scopes, lifecycle, context, stop/resume and dashboard passed")
-vim.cmd("qa!")
+T.done("taskbay core: routing, Git scopes, lifecycle, context, stop/resume and dashboard passed")

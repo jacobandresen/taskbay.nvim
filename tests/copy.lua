@@ -1,16 +1,11 @@
 -- Run: timeout 30 nvim --headless -u NONE -i NONE -l tests/copy.lua
-local plugin = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
-vim.opt.rtp:prepend(plugin)
-vim.g.mapleader = " "
+local T = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/lib.lua")({ name = "copy" })
 local core = require("taskbay.core")
 local tasks = require("taskbay.store")
 local ui = require("taskbay.ui")
-local temp = vim.fn.tempname()
-vim.fn.mkdir(temp .. "/repo", "p")
-vim.g.taskbay = { state_dir = temp .. "/state" }
+local temp = T.temp
 _G.LazyVim = { root = setmetatable({}, { __call = function() return temp .. "/repo" end }) }
-local messages, gh_calls, creations = {}, {}, {}
-vim.notify = function(message) messages[#messages + 1] = tostring(message) end
+local messages, gh_calls, creations = T.messages, {}, {}
 local choice = "Cancel"
 local on_confirm, fail_create, create_url
 core.choose = function()
@@ -39,17 +34,7 @@ core.run = function(argv, cwd, optional, stdin)
   creations[#creations + 1] = { title = argv[7], body = stdin }
   return { code = 0, stdout = create_url or ("https://github.com/test/repo/issues/" .. (98 + #creations) .. "\n") }
 end
-local function await(fn)
-  local result, done, failure
-  core.task(function()
-    local ok, value = pcall(fn)
-    if ok then result = value else failure = value end
-    done = true
-  end)
-  assert(vim.wait(5000, function() return done end, 10), table.concat(messages, "\n"))
-  assert(not failure, failure)
-  return result
-end
+local await = T.await
 local function action(fn)
   local thread = fn()
   assert(vim.wait(5000, function() return coroutine.status(thread) == "dead" end, 10), table.concat(messages, "\n"))
@@ -58,14 +43,8 @@ local function enabled(value)
   vim.g.taskbay = vim.tbl_extend("force", vim.g.taskbay, { remote_enabled = value })
 end
 
-local ok, failure = xpcall(function()
-  for _, args in ipairs({
-    { "init", "-b", "main" }, { "config", "user.name", "Test" },
-    { "config", "user.email", "test@example.invalid" },
-  }) do await(function() core.git(temp .. "/repo", unpack(args)) end) end
-  core.write(temp .. "/repo/code.txt", "Original\n")
-  await(function() core.git(temp .. "/repo", "add", "code.txt") end)
-  await(function() core.git(temp .. "/repo", "commit", "-m", "Initial") end)
+T.create_repository("repo", { ["code.txt"] = { "Original" } })
+T.case("disabled integration, confirmed import/export, preserved Markdown and originals", function()
   local repo = await(function() return core.repository(temp .. "/repo") end)
   -- Disabled integration: import refuses early with an actionable message (no coroutine).
   require("taskbay.remote").import_task("42")
@@ -152,12 +131,6 @@ local ok, failure = xpcall(function()
   require("taskbay.remote").import_task()
   require("taskbay.remote").import_picker = picker
   assert(opened, "Import without a number or active issue opens the picker")
-end, function(err) return debug.traceback(err) end)
+end)
 
-vim.fn.delete(temp, "rf")
-if not ok then
-  io.stderr:write(tostring(failure) .. "\n\nMSGS: " .. table.concat(messages, " || ") .. "\n")
-  vim.cmd("cquit 1")
-end
-print("taskbay copy: disabled integration, confirmed import/export, preserved Markdown and originals passed")
-vim.cmd("qa!")
+T.done("taskbay copy: disabled integration, confirmed import/export, preserved Markdown and originals passed")
