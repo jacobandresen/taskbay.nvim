@@ -389,6 +389,8 @@ function M.open(workspace)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = "markdown"
+  -- Pickers and explorers (Snacks) open files here rather than over the agent terminal.
+  vim.b[buf].snacks_main = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
     "# " .. tasks.label(workspace) .. ": " .. workspace.title,
     "",
@@ -516,6 +518,8 @@ function M.show(workspace)
   vim.api.nvim_win_set_buf(0, job.buf)
   vim.api.nvim_win_set_width(0, math.max(30, math.floor(vim.o.columns * 0.4)))
   vim.wo.number, vim.wo.relativenumber, vim.wo.signcolumn = false, false, "no"
+  -- Files opened from an explorer or picker must never replace the agent's terminal.
+  vim.wo.winfixbuf = true
   vim.wo.winbar = " \u{f085} " .. M.agent().title .. " " .. tasks.label(workspace) .. " "
   if not job.exited then vim.cmd.startinsert() end
 end
@@ -684,7 +688,12 @@ function M.start(workspace, issue)
   if not started or job.channel <= 0 then fail(start_error or ("Could not start " .. agent.title)) end
   -- A new run (resume or restart) takes over the windows of the previous run's terminal.
   if previous and previous ~= job and vim.api.nvim_buf_is_valid(previous.buf) then
-    for _, win in ipairs(vim.fn.win_findbuf(previous.buf)) do vim.api.nvim_win_set_buf(win, buf) end
+    for _, win in ipairs(vim.fn.win_findbuf(previous.buf)) do
+      local fixed = vim.wo[win].winfixbuf
+      vim.wo[win].winfixbuf = false
+      vim.api.nvim_win_set_buf(win, buf)
+      vim.wo[win].winfixbuf = fixed
+    end
     vim.api.nvim_buf_delete(previous.buf, { force = true })
   end
   local pid = vim.fn.jobpid(job.channel)

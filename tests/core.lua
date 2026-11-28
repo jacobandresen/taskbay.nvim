@@ -670,6 +670,7 @@ local ok, failure = pcall(function()
   core.choose = function() return "Commit and merge" end
   fails(function() core.finish(cws) end, "Merge failed")
   cmd({ "git", "merge", "--abort" }, lrepo.root)
+  vim.cmd.tabnew() -- away from the pinned agent window
   vim.cmd.edit(vim.fn.fnameescape(tasks.file(cws)))
   vim.api.nvim_buf_set_lines(0, -1, -1, false, { "unsaved" })
   fails(function() core.delete(cws) end, "Save or discard modified task buffers")

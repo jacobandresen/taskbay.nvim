@@ -380,6 +380,7 @@ local ok, failure = xpcall(function()
   assert(vim.wait(5000, function() return running.sequence ~= nil and not running.exited end, 10),
     table.concat(messages, "\n"))
   vim.fn.writefile({ "alpha beta gamma", "delta" }, active.path .. "/notes.txt")
+  core.open(active) -- the agent's window is pinned to its terminal
   vim.cmd("edit " .. vim.fn.fnameescape(active.path .. "/notes.txt"))
   local notes = vim.api.nvim_get_current_buf()
   vim.fn.setpos(".", { notes, 1, 7, 0 })

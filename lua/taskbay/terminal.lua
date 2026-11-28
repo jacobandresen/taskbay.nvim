@@ -27,6 +27,7 @@ function M.toggle(resume)
         if vim.api.nvim_win_get_buf(win) == job.buf then
           if resume and job.exited then return core.task(function() core.start(workspace) end) end
           if #vim.api.nvim_tabpage_list_wins(0) == 1 then
+            vim.wo[win].winfixbuf = false
             vim.api.nvim_win_set_buf(win, vim.api.nvim_create_buf(true, false))
           else
             vim.api.nvim_win_close(win, false)

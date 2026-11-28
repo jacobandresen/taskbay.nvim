@@ -291,6 +291,8 @@ function M.compose(repo, on_created)
   vim.api.nvim_buf_set_name(buf, name)
   -- New tasks start with an Actions checklist: the agent works through and keeps it current.
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "# ", "", "## Actions", "", "- [ ] " })
+  -- Leave a pinned window (the agent's terminal) alone.
+  if vim.wo.winfixbuf then vim.cmd("botright vsplit") end
   vim.api.nvim_win_set_buf(0, buf)
   vim.wo.winbar = " \u{f0f6} New task  ·  # title, then the body  ·  :write creates it  ·  " .. core.key("panel") .. " starts it "
   local write

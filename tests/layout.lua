@@ -88,6 +88,14 @@ local ok, failure = pcall(function()
     core.show(workspace)
   ]])
   assert(poll(3000, function() return rpc("nvim_get_mode").mode == "t" end))
+  lua([[
+    local agent = vim.fn.win_findbuf(pi_terminal_buf)[1]
+    assert(vim.wo[agent].winfixbuf, "The agent window must keep its terminal")
+    -- Snacks' explorer and pickers open files in the task window, not over the agent.
+    local main = require("snacks.picker.core.main").new():find()
+    assert(main ~= agent and vim.api.nvim_win_get_buf(main) ~= pi_terminal_buf,
+      "Files picked in the task tab must not replace the agent terminal")
+  ]])
   rpc("nvim_input", "<F6>")
   assert(poll(3000, function() return lua("return #vim.fn.win_findbuf(pi_terminal_buf) == 0") end),
     "F6 must hide Pi directly from terminal input")
